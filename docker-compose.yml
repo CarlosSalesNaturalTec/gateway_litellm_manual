@@ -1,0 +1,73 @@
+# =====================================================================
+# LiteLLM Gateway + PostgreSQL — Docker Engine (WSL2)
+# ---------------------------------------------------------------------
+# Subir:    docker compose up -d
+# Logs:     docker compose logs -f litellm
+# Parar:    docker compose down
+# Reset DB: docker compose down -v   (CUIDADO: apaga o volume do Postgres)
+# =====================================================================
+
+services:
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: litellm-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    # NÃO expor 5432 para a LAN — acesso só pela rede interna do compose
+    expose:
+      - "5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  litellm:
+    image: ghcr.io/berriai/litellm-database:main-stable
+    container_name: litellm-gateway
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      # 4000 fica acessível no WSL2; com networkingMode=mirrored também na LAN
+      - "4000:4000"
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+    environment:
+      # API keys reais — lidas do .env
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+
+      # Credencial administrativa do gateway
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY}
+
+      # Conexão com o Postgres (service name resolve via DNS interno do compose)
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+
+      # Persistir modelos no banco — habilita dashboard /ui
+      STORE_MODEL_IN_DB: "True"
+    # Necessário para o container alcançar LM Studio rodando no Windows host
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    command:
+      - "--config=/app/config.yaml"
+      - "--host=0.0.0.0"
+      - "--port=4000"
+      - "--num_workers=1"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:4000/health/liveliness"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+
+volumes:
+  postgres_data:
+    name: litellm_postgres_data
