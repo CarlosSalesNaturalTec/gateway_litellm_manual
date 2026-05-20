@@ -58,7 +58,7 @@
 │        │   │ (Windows host)      │                       │              │
 │        │   │ deepseek / qwen     │                       │              │
 │        │   └────────┬────────────┘                       │              │
-│        │            ▲ host.docker.internal:1234          │              │
+│        │            ▲ 10.150.0.69:1234 (LAN, fw block)   │              │
 │        │            │                                    │              │
 │        │   ┌────────┴───── WSL2 (Ubuntu) ─────────────┐  │              │
 │        │   │  Docker Engine                           │  │              │
@@ -175,14 +175,35 @@ hostAddressLoopback=true
 
 **Habilitar `systemd` dentro do Ubuntu** (necessário para o Docker iniciar como serviço gerenciado):
 
+> ⚠️ **Pré-requisito:** a distro precisa já ter sido aberta uma vez para você criar o usuário UNIX inicial (`Enter new UNIX username` / `New password`). Sem isso o `sudo` falha. Se ainda não fez, rode `wsl` no PowerShell, complete o setup do usuário e `exit`.
+
+> ⚠️ **Não use stdin via pipe do PowerShell para o `sudo` do WSL.** Comandos como `@'...'@ | wsl -- sudo tee ...` quebram o prompt interativo da senha (o `sudo` lê a senha de stdin junto com o conteúdo do arquivo e falha). O caminho que funciona é entrar no WSL primeiro e rodar o heredoc bash interativamente, onde o `sudo` consegue pedir a senha no TTY.
+
+**Passo 1 — Entrar no WSL (no PowerShell):**
+
 ```powershell
-wsl -d Ubuntu -- sudo tee /etc/wsl.conf <<'EOF'
+wsl
+```
+
+**Passo 2 — Já dentro do Ubuntu, criar o arquivo com heredoc bash:**
+
+```bash
+sudo tee /etc/wsl.conf << 'EOF'
 [boot]
 systemd=true
 
 [network]
 generateResolvConf=true
 EOF
+```
+
+O `sudo` vai pedir a senha do seu usuário do Ubuntu no terminal interativo. Depois o `tee` grava em `/etc/wsl.conf` e ecoa o conteúdo no console — isso é esperado.
+
+**Passo 3 — Conferir e sair:**
+
+```bash
+cat /etc/wsl.conf
+exit
 ```
 
 **Reiniciar o WSL para aplicar tudo:**
@@ -278,7 +299,9 @@ sudo systemctl restart docker
 
 ## 3.4 Instalação e configuração do LM Studio (no Windows host)
 
-O LM Studio continua sendo instalado nativamente no Windows porque é GUI e gerencia GPU/CPU nativamente. Os containers do WSL2 acessam o LM Studio via `host.docker.internal`.
+O LM Studio continua sendo instalado nativamente no Windows porque é GUI e gerencia GPU/CPU nativamente. Os containers do WSL2 acessam o LM Studio através do **IP fixo do PC servidor na LAN (`10.150.0.69:1234`)** — não via `host.docker.internal`.
+
+> ⚠️ **Por que não `host.docker.internal`?** Mesmo com `hostAddressLoopback=true` no `.wslconfig` e `extra_hosts: host.docker.internal:host-gateway` no compose, o nome resolve para o gateway da bridge do Docker (`172.17.0.1`), que é uma interface dentro da VM do WSL — não o loopback do Windows. O `hostAddressLoopback` ajuda a shell do WSL a alcançar o `127.0.0.1` do Windows, mas não estende esse benefício aos containers do Docker (uma camada de rede a mais). A solução prática é deixar o LM Studio escutando em `0.0.0.0:1234` e proteger a porta com firewall (passo abaixo).
 
 1. Acesse https://lmstudio.ai/ e baixe a versão mais recente para Windows
 2. Execute o instalador como administrador
@@ -289,9 +312,33 @@ O LM Studio continua sendo instalado nativamente no Windows porque é GUI e gere
 5. Vá em **Settings → Developer**:
    - Marque **"Auto-start LLM server on app launch"**
    - **"Server port"** = `1234`
-   - **"Serve on local network"** = **OFF** (manter restrito ao localhost do Windows)
+   - **"Serve on local network"** = **ON** (necessário para o container Docker alcançar o LM Studio via `10.150.0.69:1234`)
 
-> 💡 **Por que LM Studio em localhost se o container precisa acessar?** Graças ao `hostAddressLoopback=true` no `.wslconfig` (seção 3.2), o WSL2 enxerga o `127.0.0.1` do Windows host. Combinado com `extra_hosts: host.docker.internal:host-gateway` no compose, o container resolve `host.docker.internal` → IP da rede vEthernet (WSL) → loopback do Windows. Não é necessário expor o LM Studio na LAN.
+### Regra de firewall para a porta 1234
+
+Como o LM Studio agora escuta em `0.0.0.0:1234`, é preciso bloquear o acesso externo na porta 1234 e permitir apenas conexões locais (do próprio Windows e dos containers do Docker via WSL).
+
+**PowerShell como administrador:**
+
+```powershell
+# Bloquear porta 1234 vinda da LAN externa
+New-NetFirewallRule `
+  -DisplayName "LM Studio (block LAN)" `
+  -Direction Inbound `
+  -LocalPort 1234 `
+  -Protocol TCP `
+  -Action Block `
+  -Profile Private,Domain `
+  -RemoteAddress 10.150.0.0/24
+```
+
+> 📝 Conexões originadas do próprio host (loopback) e dos containers do Docker rodando dentro do WSL com `networkingMode=mirrored` aparecem para o Windows como tráfego local (origem `10.150.0.69` → destino `10.150.0.69`) — não filtrado por esta regra. Conexões vindas de outros IPs da LAN (`10.150.0.x` ≠ `.69`) ficam bloqueadas.
+
+**Validar a regra:**
+
+```powershell
+Get-NetFirewallRule -DisplayName "LM Studio (block LAN)" | Format-List
+```
 
 ## 3.5 Download dos modelos open source
 
@@ -308,7 +355,7 @@ Para cada modelo:
 1. Pesquise pelo nome
 2. Selecione o arquivo com a quantização correta
 3. Clique em **Download**
-4. Anote o **identificador exato** que aparece no LM Studio após o download — necessário no `config.docker.yaml`
+4. Anote o **identificador exato** que aparece no LM Studio após o download — necessário no `config.yaml`
 
 > 💡 Para descobrir o identificador exato, vá na aba **My Models** do LM Studio. O nome listado ali é o que o servidor expõe na API.
 
@@ -322,14 +369,23 @@ Para cada modelo:
    - **Auto-Unload:** habilitado (descarrega após 10 minutos de inatividade)
    - **CORS:** desabilitado
 
-**Verificar acesso a partir do WSL** (com o LM Studio rodando):
+**Verificar acesso a partir do WSL e a partir de um container** (com o LM Studio rodando):
 
 ```bash
-# Dentro do WSL Ubuntu
-curl http://host.docker.internal:1234/v1/models
+# 1) Teste do WSL host — confirma mirrored networking + LM Studio escutando
+curl http://localhost:1234/v1/models
+
+# 2) Teste do container — confirma o caminho que o LiteLLM vai usar em produção
+docker run --rm curlimages/curl -s http://10.150.0.69:1234/v1/models
 ```
 
-Deve retornar JSON com a lista de modelos baixados. Se der erro de conexão, confirme em `.wslconfig` que `[experimental] hostAddressLoopback=true` está presente e que o WSL foi reiniciado (`wsl --shutdown` + reabrir).
+Ambos devem retornar o JSON com a lista de modelos baixados.
+
+> ⚠️ **Não use `host.docker.internal` como teste** — ele resolve para o gateway da bridge do Docker (`172.17.0.1`), que **não é** o loopback do Windows e vai dar `Connection refused`. O caminho correto é via o IP fixo do PC servidor na LAN (`10.150.0.69`).
+
+**Se o teste 1 falhar:** confirme em `.wslconfig` que `networkingMode=mirrored` e `[experimental] hostAddressLoopback=true` estão presentes, e reinicie o WSL (`wsl --shutdown` + reabrir).
+
+**Se o teste 2 falhar (mas o 1 passar):** confirme que **"Serve on local network = ON"** no LM Studio (Settings → Developer) — sem isso ele só escuta em `127.0.0.1` e o container não alcança.
 
 ## 3.7 Preparar a pasta do projeto e os arquivos do compose
 
@@ -349,17 +405,10 @@ Os três arquivos necessários já existem no repositório:
 | Arquivo | Função |
 |---|---|
 | `docker-compose.yml` | Definição dos serviços `postgres` e `litellm` |
-| `config.docker.yaml` | Configuração do LiteLLM (modelos, fallbacks, routing) com `api_base` para LM Studio em `host.docker.internal:1234` |
+| `config.yaml` | Configuração do LiteLLM (modelos, fallbacks, routing) com `api_base` para LM Studio em `http://10.150.0.69:1234/v1` |
 | `.env.example` | Template das variáveis (Anthropic, Gemini, master key, credenciais Postgres) |
 
-> 📝 O `docker-compose.yml` neste repositório monta `./config.yaml`. Para usar a versão Docker, ajuste a linha de `volumes` para apontar para `./config.docker.yaml` OU renomeie o arquivo. **Opção recomendada (mais limpa):**
->
-> ```bash
-> # Renomear (no WSL ou no Windows)
-> cp config.docker.yaml config.yaml.docker-backup
-> ```
->
-> ou edite `docker-compose.yml` para refletir o nome real.
+> 📝 O `docker-compose.yml` deste repositório já monta `./config.yaml` direto — nenhum renomeio necessário. O `api_base` dos modelos locais aponta para `http://10.150.0.69:1234/v1`; se o IP fixo do seu PC servidor for diferente, ajuste no `config.yaml` antes de subir os containers.
 
 ## 3.8 Geração da master key segura
 
@@ -670,7 +719,7 @@ http://localhost:4000/ui
 
 **Tab "Logs":** histórico de requisições (input, output, modelo, custo, latência) — **atenção LGPD** se houver dados sensíveis
 
-**Tab "Settings":** adicionar/remover modelos sem editar `config.docker.yaml` (gravado no Postgres), webhooks de alerta de budget
+**Tab "Settings":** adicionar/remover modelos sem editar `config.yaml` (gravado no Postgres), webhooks de alerta de budget
 
 ### Recomendações de uso
 
@@ -907,7 +956,7 @@ $env:ANTHROPIC_MODEL = "deepseek-local"
 claude
 ```
 
-O LiteLLM (container) roteia para o LM Studio (Windows host) via `host.docker.internal:1234` — os prompts e respostas nunca saem do PC servidor.
+O LiteLLM (container) roteia para o LM Studio (Windows host) via `10.150.0.69:1234` — os prompts e respostas nunca saem do PC servidor (a porta 1234 fica bloqueada para a LAN externa pelo firewall do Windows configurado em 3.4).
 
 ---
 
@@ -927,7 +976,7 @@ docker compose logs litellm --tail 100
 | `connection refused` em `postgres:5432` | Container do Postgres ainda não pronto | Aguardar — `depends_on` com `condition: service_healthy` resolve em até 30s |
 | `password authentication failed for user "litellm_user"` | `.env` diferente do volume já populado | Apagar volume e recriar: `docker compose down -v && docker compose up -d` |
 | `Authentication Error... ANTHROPIC_API_KEY` vazia | `.env` não carregado | Confirmar `docker compose config` e reiniciar |
-| `Could not resolve host: host.docker.internal` | `extra_hosts` ausente do compose ou Docker antigo | Atualizar Docker Engine; conferir bloco `extra_hosts` no `docker-compose.yml` |
+| `Connection refused` em `10.150.0.69:1234` | LM Studio com "Serve on local network=OFF" ou parado | Em LM Studio → Developer → Server Options: ligar "Serve on local network", confirmar Start Server verde |
 
 ### Dev não consegue conectar (`Connection refused` / `Timeout`)
 
@@ -978,7 +1027,7 @@ docker compose logs litellm --tail 100
 Vem do provider (Anthropic/Gemini), não do LiteLLM. Soluções:
 
 - Aguardar (rate limit típico expira em 1 minuto)
-- O LiteLLM aciona o fallback automático definido no `config.docker.yaml`
+- O LiteLLM aciona o fallback automático definido no `config.yaml`
 - Trocar manualmente: `claude --model gemini-2-5-pro`
 
 ### Modelo local não responde (`qwen-*-local`, `deepseek-local`)
@@ -989,12 +1038,15 @@ Vem do provider (Anthropic/Gemini), não do LiteLLM. Soluções:
    # No Windows
    Invoke-RestMethod http://localhost:1234/v1/models
    ```
-3. Container alcança o host?
+3. Container alcança o LM Studio?
    ```bash
-   docker compose exec litellm wget -qO- http://host.docker.internal:1234/v1/models
+   docker compose exec litellm wget -qO- http://10.150.0.69:1234/v1/models
    ```
-   Se falhar, revisar `.wslconfig` (`hostAddressLoopback=true`) e o bloco `extra_hosts` no compose.
-4. Nome do modelo no `config.docker.yaml` bate com o do LM Studio (aba **My Models**)?
+   Se falhar, confirme:
+   - LM Studio em **Settings → Developer → "Serve on local network = ON"**
+   - Server está em "Running on port 1234" na aba Developer
+   - A regra de firewall `LM Studio (block LAN)` (seção 3.4) não está bloqueando o próprio host — o tráfego do container via NAT do WSL deve aparecer como originado de `10.150.0.69`, não como remote LAN
+4. Nome do modelo no `config.yaml` bate com o que aparece na aba **My Models** do LM Studio?
 
 ### Containers não sobem após reboot do Windows
 
@@ -1134,7 +1186,7 @@ docker compose logs --tail=200 litellm
 
 Use o dashboard web (`/ui`) na aba **Models** — alterações são gravadas no Postgres e aplicadas dinamicamente.
 
-Para mudanças permanentes via `config.docker.yaml`, edite o arquivo e recarregue:
+Para mudanças permanentes via `config.yaml`, edite o arquivo e recarregue:
 
 ```bash
 docker compose restart litellm
@@ -1186,7 +1238,8 @@ Antes de considerar a configuração concluída, confirme:
 - [ ] Firewall do Windows com regra `LiteLLM Gateway (LAN only)` restrita ao range `10.150.0.0/24`
 - [ ] Interface de rede do servidor classificada como **Private**
 - [ ] Roteador da rede **não** tem port forwarding na porta 4000
-- [ ] LM Studio em `127.0.0.1:1234` (NÃO exposto à LAN) — acessado pelo container via `host.docker.internal`
+- [ ] LM Studio em `0.0.0.0:1234` com "Serve on local network = ON" — acesso da LAN **bloqueado** pela regra `LM Studio (block LAN)` no firewall do Windows (apenas o próprio host e os containers do Docker no WSL alcançam)
+- [ ] `config.yaml` com `api_base: http://10.150.0.69:1234/v1` para os modelos locais (não `host.docker.internal`)
 - [ ] Cada dev tem virtual key **única**, nunca compartilhada
 - [ ] Notebooks dos devs têm `ANTHROPIC_BASE_URL` e `ANTHROPIC_AUTH_TOKEN` no nível **usuário**
 - [ ] Notebooks dos devs **não** têm `ANTHROPIC_API_KEY` definida

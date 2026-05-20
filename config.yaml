@@ -2,10 +2,13 @@
 # LiteLLM config — versão para Docker (container Linux no WSL2)
 # ---------------------------------------------------------------------
 # Diferença para o config.yaml nativo:
-#   - api_base do LM Studio usa host.docker.internal (não localhost),
-#     porque "localhost" dentro do container é o próprio container.
-#   - host.docker.internal resolve para o Windows host via
-#     "extra_hosts: host-gateway" no docker-compose.yml.
+#   - api_base do LM Studio aponta para o IP fixo do PC servidor na LAN
+#     (10.150.0.69), porque "localhost" dentro do container é o próprio
+#     container e host.docker.internal só resolve para a bridge do Docker
+#     (172.17.0.1), que não alcança o LM Studio escutando no Windows host.
+#   - Com networkingMode=mirrored o container alcança 10.150.0.69 pelo eth0
+#     do WSL — desde que o LM Studio esteja com "Serve on local network=ON"
+#     e o firewall do Windows bloqueie a porta 1234 para o restante da LAN.
 # =====================================================================
 
 # ===== Modelos disponíveis =====
@@ -42,7 +45,7 @@ model_list:
   - model_name: deepseek-local
     litellm_params:
       model: openai/deepseek-coder-v2-lite-instruct
-      api_base: http://host.docker.internal:1234/v1
+      api_base: http://10.150.0.69:1234/v1
       api_key: "lm-studio"
       temperature: 0.2
       max_tokens: 2048
@@ -50,7 +53,7 @@ model_list:
   - model_name: qwen-14b-local
     litellm_params:
       model: openai/qwen2.5-coder-14b-instruct
-      api_base: http://host.docker.internal:1234/v1
+      api_base: http://10.150.0.69:1234/v1
       api_key: "lm-studio"
       temperature: 0.2
       max_tokens: 2048
@@ -58,7 +61,7 @@ model_list:
   - model_name: qwen-7b-local
     litellm_params:
       model: openai/qwen2.5.1-coder-7b-instruct
-      api_base: http://host.docker.internal:1234/v1
+      api_base: http://10.150.0.69:1234/v1
       api_key: "lm-studio"
       temperature: 0.2
       max_tokens: 2048

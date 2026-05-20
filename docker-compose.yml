@@ -53,9 +53,6 @@ services:
 
       # Persistir modelos no banco — habilita dashboard /ui
       STORE_MODEL_IN_DB: "True"
-    # Necessário para o container alcançar LM Studio rodando no Windows host
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     command:
       - "--config=/app/config.yaml"
       - "--host=0.0.0.0"
