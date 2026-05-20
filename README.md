@@ -284,18 +284,76 @@ docker run --rm hello-world
 
 Se `hello-world` imprime a mensagem de sucesso, o Docker está pronto.
 
-### Rede corporativa com proxy SSL auto-assinado (opcional)
+### Rede corporativa com SSL inspection (FortiGate, ZScaler, McAfee Web Gateway, etc.)
 
-Se o `docker pull` falhar com erro de certificado:
+Aplicável se o `docker pull` falhar com erro do tipo:
+
+```
+tls: failed to verify certificate: x509: certificate signed by unknown authority
+```
+
+O sintoma é: o firewall corporativo está fazendo **TLS inspection** (man-in-the-middle "do bem"), o Windows confia no CA dele (foi instalado por política de domínio), mas o WSL Ubuntu não — e o Docker usa o trust store do Ubuntu, não do Windows.
+
+**Passo 1 — Descobrir qual CA está interceptando** (PowerShell no Windows):
+
+```powershell
+$tcp = New-Object Net.Sockets.TcpClient
+$tcp.Connect('ghcr.io', 443)
+$ssl = New-Object Net.Security.SslStream($tcp.GetStream(), $false, {$true})
+$ssl.AuthenticateAsClient('ghcr.io')
+$chain = New-Object Security.Cryptography.X509Certificates.X509Chain
+$chain.Build([Security.Cryptography.X509Certificates.X509Certificate2]$ssl.RemoteCertificate) | Out-Null
+$chain.ChainElements | ForEach-Object {
+  Write-Host ("Subject: " + $_.Certificate.Subject)
+  Write-Host ("Issuer : " + $_.Certificate.Issuer)
+  Write-Host ("Thumbprint: " + $_.Certificate.Thumbprint)
+  Write-Host ""
+}
+$ssl.Dispose(); $tcp.Close()
+```
+
+Numa rede sem inspection o leaf `*.ghcr.io` é emitido por uma CA pública (Let's Encrypt, DigiCert etc.). Com inspection, o issuer revela o produto — ex: `CN=FG100FTK22013189, O=Fortinet` (FortiGate). Anote o **Thumbprint** do(s) CA(s) auto-assinado(s) na cadeia.
+
+**Passo 2 — Exportar o(s) CA(s) do certificate store do Windows para o projeto:**
+
+```powershell
+$out = "C:\codeDiversos\gateway_litellm_manual\certs"
+New-Item -ItemType Directory -Force -Path $out | Out-Null
+
+# Liste todos os Fortinet/ZScaler/McAfee instalados (ajuste o filtro)
+Get-ChildItem Cert:\LocalMachine\Root | Where-Object {
+  $_.Subject -like "*Fortinet*" -or $_.Subject -like "*ZScaler*" -or $_.Subject -like "*McAfee*"
+} | ForEach-Object {
+  $name = ($_.Subject -replace '.*CN=([^,]+).*','$1') -replace '[^A-Za-z0-9]','_'
+  $pem = "-----BEGIN CERTIFICATE-----`n" +
+         [Convert]::ToBase64String($_.RawData, 'InsertLineBreaks') +
+         "`n-----END CERTIFICATE-----`n"
+  $path = Join-Path $out "$name.crt"
+  [IO.File]::WriteAllText($path, $pem, [Text.UTF8Encoding]::new($false))
+  Write-Host "Exportado: $path"
+}
+```
+
+Resultado: um `.crt` por CA em `C:\codeDiversos\gateway_litellm_manual\certs\`. **Adicione `certs/` ao `.gitignore`** se ainda não estiver — embora os CAs do firewall não sejam segredo, eles identificam o equipamento de rede e não precisam viver no repo.
+
+**Passo 3 — Instalar os CAs no trust store do WSL Ubuntu** (no terminal WSL, interativo):
 
 ```bash
-# Adicionar o CA do proxy corporativo ao trust store do Ubuntu
-sudo cp /mnt/c/caminho/para/proxy-ca.crt /usr/local/share/ca-certificates/proxy-ca.crt
-sudo update-ca-certificates
-
-# Reiniciar o daemon
+sudo cp /mnt/c/codeDiversos/gateway_litellm_manual/certs/*.crt /usr/local/share/ca-certificates/
+sudo update-ca-certificates    # esperado: "N added, 0 removed"
 sudo systemctl restart docker
 ```
+
+> ⚠️ **Não pipeie o `sudo` via stdin do PowerShell** (`@'...'@ | wsl -- sudo ...`) — o prompt de senha quebra. Entre no WSL com `wsl` e rode os comandos no terminal interativo.
+
+**Passo 4 — Validar:**
+
+```bash
+docker run --rm hello-world           # pull pequeno, falha rápido se TLS ainda quebrado
+docker compose pull                   # baixa as imagens do compose
+```
+
+Se `hello-world` passar, prossiga com a etapa 3.10 (`docker compose up -d`).
 
 ## 3.4 Instalação e configuração do LM Studio (no Windows host)
 
@@ -518,13 +576,17 @@ curl http://localhost:4000/health/liveliness
 Invoke-RestMethod http://localhost:4000/health/liveliness
 ```
 
-Resposta esperada: `{"status":"healthy"}`.
+Resposta esperada: `I'm alive!` (texto puro). Para checagem mais completa (incluindo conexão com o Postgres), use `/health/readiness` — que retorna um JSON com `db = connected`.
 
 **Teste de chamada completa com a master key:**
 
 ```powershell
+# Lê a master key direto do .env (evita colar a chave em texto plano no histórico do PowerShell)
+$envPath = "C:\codeDiversos\gateway_litellm_manual\.env"
+$mk = (Select-String -Path $envPath -Pattern '^LITELLM_MASTER_KEY=').Line.Substring('LITELLM_MASTER_KEY='.Length)
+
 $headers = @{
-  "Authorization" = "Bearer <MASTER_KEY>"
+  "Authorization" = "Bearer $mk"
   "Content-Type"  = "application/json"
 }
 $body = @{
@@ -535,6 +597,8 @@ $body = @{
 Invoke-RestMethod -Uri "http://localhost:4000/v1/chat/completions" `
   -Method Post -Headers $headers -Body $body
 ```
+
+> ⚠️ **Se preferir colar a chave inline** (ex: testando de outra máquina sem acesso ao `.env`), substitua a primeira linha por `$mk = "sk-suaMasterKeyReal..."`. **Nunca** deixe o placeholder literal `<MASTER_KEY>` — o LiteLLM responde 401 com mensagem `LiteLLM Virtual Key expected. Received=<MAS****KEY>, expected to start with 'sk-'`.
 
 Se retornar uma resposta JSON com o texto do Claude, o gateway está funcionando.
 
@@ -589,7 +653,9 @@ Cada dev recebe uma chave única, com permissões e budget próprios. Os contain
 ### Criação via curl/PowerShell
 
 ```powershell
-$masterKey = "<MASTER_KEY>"
+# Mesma técnica de 3.10: lê do .env (ou substitua por $masterKey = "sk-...")
+$envPath = "C:\codeDiversos\gateway_litellm_manual\.env"
+$masterKey = (Select-String -Path $envPath -Pattern '^LITELLM_MASTER_KEY=').Line.Substring('LITELLM_MASTER_KEY='.Length)
 
 $headers = @{
   "Authorization" = "Bearer $masterKey"
@@ -1076,7 +1142,11 @@ wsl -d Ubuntu -- bash -lc "cd /mnt/c/codeDiversos/gateway_litellm_manual && dock
 
 ### `docker pull` falha por SSL em rede corporativa
 
-Adicione o CA do proxy ao trust store do Ubuntu (ver final de 3.3). Para `docker push`/`pull` específicos com TLS auto-assinado, configure também `daemon.json`:
+Sintoma típico: `tls: failed to verify certificate: x509: certificate signed by unknown authority` ao puxar de `ghcr.io`, `docker.io`, etc. Causa: firewall corporativo (FortiGate/ZScaler/McAfee Web Gateway) fazendo TLS inspection — o Windows confia no CA dele, o WSL não.
+
+**Solução completa:** ver subseção [Rede corporativa com SSL inspection](#rede-corporativa-com-ssl-inspection-fortigate-zscaler-mcafee-web-gateway-etc) ao final de 3.3 (descobrir o CA pela cadeia TLS → exportar do store do Windows → instalar no trust store do WSL → reiniciar Docker).
+
+Para registries com TLS auto-assinado fora da inspection (raro neste setup), configure também `daemon.json`:
 
 ```bash
 sudo tee /etc/docker/daemon.json <<'EOF'
