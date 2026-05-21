@@ -755,8 +755,17 @@ $body = @{
 **Listar todas as chaves:**
 
 ```powershell
-Invoke-RestMethod -Uri "http://localhost:4000/key/info" -Headers $headers
+Invoke-RestMethod -Uri "http://localhost:4000/key/list" -Headers $headers
 ```
+
+**Ver detalhes de uma chave específica** (gasto acumulado, modelos permitidos, budget):
+
+```powershell
+$key = "sk-9KvP3xZ..."   # substitua pela chave virtual
+Invoke-RestMethod -Uri "http://localhost:4000/key/info?key=$key" -Headers $headers
+```
+
+> ⚠️ `/key/info` **sem** o parâmetro `?key=...` retorna `404 Key not found in database` — ele só responde sobre uma chave específica, não lista todas. Use `/key/list` para listar.
 
 **Atualizar uma chave (ex: aumentar budget):**
 
