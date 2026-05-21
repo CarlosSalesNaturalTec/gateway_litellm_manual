@@ -594,13 +594,33 @@ $body = @{
   messages = @(@{role="user"; content="Diga 'oi' em português"})
 } | ConvertTo-Json -Depth 5
 
-Invoke-RestMethod -Uri "http://localhost:4000/v1/chat/completions" `
+$resp = Invoke-RestMethod -Uri "http://localhost:4000/v1/chat/completions" `
   -Method Post -Headers $headers -Body $body
+
+# Texto da resposta do modelo
+$resp.choices[0].message.content
+
+# (opcional) JSON completo com metadados de uso/roteamento
+$resp | ConvertTo-Json -Depth 10
+```
+
+> 💡 **Por que extrair `choices[0].message.content`?** O `Invoke-RestMethod` desserializa o JSON num objeto e exibe apenas o primeiro nível em formato tabular — `message=` aparece colapsado. O texto real do modelo vive em `choices[0].message.content`. Sem a extração, parece que a chamada não trouxe resposta.
+
+**Validar os demais providers** trocando o `model` e refazendo a chamada (a mesma `$headers` continua válida):
+
+```powershell
+# Gemini (Vertex AI) — confirma a chave GEMINI_API_KEY e o roteamento Vertex
+$body = @{ model = "gemini-3-1-pro"; messages = @(@{role="user"; content="Diga 'oi' em português"}) } | ConvertTo-Json -Depth 5
+(Invoke-RestMethod -Uri "http://localhost:4000/v1/chat/completions" -Method Post -Headers $headers -Body $body).choices[0].message.content
+
+# Modelo local via LM Studio — confirma o caminho container → 10.150.0.69:1234
+$body = @{ model = "qwen-14b-local"; messages = @(@{role="user"; content="Diga 'oi' em português"}) } | ConvertTo-Json -Depth 5
+(Invoke-RestMethod -Uri "http://localhost:4000/v1/chat/completions" -Method Post -Headers $headers -Body $body).choices[0].message.content
 ```
 
 > ⚠️ **Se preferir colar a chave inline** (ex: testando de outra máquina sem acesso ao `.env`), substitua a primeira linha por `$mk = "sk-suaMasterKeyReal..."`. **Nunca** deixe o placeholder literal `<MASTER_KEY>` — o LiteLLM responde 401 com mensagem `LiteLLM Virtual Key expected. Received=<MAS****KEY>, expected to start with 'sk-'`.
 
-Se retornar uma resposta JSON com o texto do Claude, o gateway está funcionando.
+Se cada chamada imprimir o texto do modelo correspondente, o gateway está roteando corretamente para os três providers (Anthropic, Gemini, LM Studio).
 
 ## 3.11 Firewall do Windows (LAN → porta 4000)
 
