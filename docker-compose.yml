@@ -35,12 +35,20 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    links:
+      - postgres
     ports:
       # 4000 fica acessível no WSL2; com networkingMode=mirrored também na LAN
       - "4000:4000"
     volumes:
       - ./config.yaml:/app/config.yaml:ro
+      - /etc/ssl/certs/ca-certificates.crt:/etc/ssl/certs/ca-certificates.crt:ro
     environment:
+      # Certificates
+      SSL_CERT_FILE: /etc/ssl/certs/ca-certificates.crt
+      REQUESTS_CA_BUNDLE: /etc/ssl/certs/ca-certificates.crt
+      NODE_EXTRA_CA_CERTS: /etc/ssl/certs/ca-certificates.crt
+
       # API keys reais — lidas do .env
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
       GEMINI_API_KEY: ${GEMINI_API_KEY}
