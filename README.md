@@ -853,7 +853,7 @@ O Claude Code CLI e o OpenSpec CLI exigem Node.js 20.19.0 ou superior.
 ## 4.2 Instalação do Claude Code CLI
 
 ```powershell
-npm install -g @anthropic-ai/claude-code
+irm https://claude.ai/install.ps1 | iex
 claude --version
 ```
 
