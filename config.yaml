@@ -14,57 +14,16 @@
 # ===== Modelos disponíveis =====
 model_list:
 
-  # --- Anthropic ---
-  - model_name: claude-opus
+  # --- DeepSeek ---
+  - model_name: deepseek-v4-pro
     litellm_params:
-      model: anthropic/claude-opus-4-7
-      api_key: os.environ/ANTHROPIC_API_KEY
+      model: deepseek/deepseek-v4-pro
+      api_key: os.environ/DEEPSEEK_API_KEY
 
-  - model_name: claude-sonnet
+  - model_name: deepseek-v4-flash
     litellm_params:
-      model: anthropic/claude-sonnet-4-6
-      api_key: os.environ/ANTHROPIC_API_KEY
-
-  # --- Google Gemini ---
-  - model_name: gemini-3-1-pro
-    litellm_params:
-      model: gemini/gemini-3.1-pro-preview
-      api_key: os.environ/GEMINI_API_KEY
-
-  - model_name: gemini-2-5-pro
-    litellm_params:
-      model: gemini/gemini-2.5-pro
-      api_key: os.environ/GEMINI_API_KEY
-
-  - model_name: gemini-2-5-flash
-    litellm_params:
-      model: gemini/gemini-2.5-flash
-      api_key: os.environ/GEMINI_API_KEY
-
-  # --- Modelos locais via LM Studio (rodando no Windows host) ---
-  - model_name: deepseek-local
-    litellm_params:
-      model: openai/deepseek-coder-v2-lite-instruct
-      api_base: http://10.150.0.69:1234/v1
-      api_key: "lm-studio"
-      temperature: 0.2
-      max_tokens: 2048
-
-  - model_name: qwen-14b-local
-    litellm_params:
-      model: openai/qwen2.5-coder-14b-instruct
-      api_base: http://10.150.0.69:1234/v1
-      api_key: "lm-studio"
-      temperature: 0.2
-      max_tokens: 2048
-
-  - model_name: qwen-7b-local
-    litellm_params:
-      model: openai/qwen2.5.1-coder-7b-instruct
-      api_base: http://10.150.0.69:1234/v1
-      api_key: "lm-studio"
-      temperature: 0.2
-      max_tokens: 2048
+      model: deepseek/deepseek-v4-flash
+      api_key: os.environ/DEEPSEEK_API_KEY
 
 # ===== Configurações gerais =====
 general_settings:
@@ -77,9 +36,7 @@ general_settings:
 litellm_settings:
   drop_params: true
   fallbacks:
-    - claude-opus: ["claude-sonnet", "gemini-3-1-pro"]
-    - claude-sonnet: ["gemini-3-1-pro", "qwen-14b-local"]
-    - gemini-3-1-pro: ["gemini-2-5-pro", "claude-sonnet"]
+    - deepseek-v4-pro: ["deepseek-v4-flash"]
 
 # ===== Configurações de roteamento =====
 router_settings:

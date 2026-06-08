@@ -1,0 +1,88 @@
+# =====================================================================
+# LiteLLM config — versão para Docker (container Linux no WSL2)
+# ---------------------------------------------------------------------
+# Diferença para o config.yaml nativo:
+#   - api_base do LM Studio aponta para o IP fixo do PC servidor na LAN
+#     (10.150.0.69), porque "localhost" dentro do container é o próprio
+#     container e host.docker.internal só resolve para a bridge do Docker
+#     (172.17.0.1), que não alcança o LM Studio escutando no Windows host.
+#   - Com networkingMode=mirrored o container alcança 10.150.0.69 pelo eth0
+#     do WSL — desde que o LM Studio esteja com "Serve on local network=ON"
+#     e o firewall do Windows bloqueie a porta 1234 para o restante da LAN.
+# =====================================================================
+
+# ===== Modelos disponíveis =====
+model_list:
+
+  # --- Anthropic ---
+  - model_name: claude-opus
+    litellm_params:
+      model: anthropic/claude-opus-4-7
+      api_key: os.environ/ANTHROPIC_API_KEY
+
+  - model_name: claude-sonnet
+    litellm_params:
+      model: anthropic/claude-sonnet-4-6
+      api_key: os.environ/ANTHROPIC_API_KEY
+
+  # --- Google Gemini ---
+  - model_name: gemini-3-1-pro
+    litellm_params:
+      model: gemini/gemini-3.1-pro-preview
+      api_key: os.environ/GEMINI_API_KEY
+
+  - model_name: gemini-2-5-pro
+    litellm_params:
+      model: gemini/gemini-2.5-pro
+      api_key: os.environ/GEMINI_API_KEY
+
+  - model_name: gemini-2-5-flash
+    litellm_params:
+      model: gemini/gemini-2.5-flash
+      api_key: os.environ/GEMINI_API_KEY
+
+  # --- Modelos locais via LM Studio (rodando no Windows host) ---
+  - model_name: deepseek-local
+    litellm_params:
+      model: openai/deepseek-coder-v2-lite-instruct
+      api_base: http://10.150.0.69:1234/v1
+      api_key: "lm-studio"
+      temperature: 0.2
+      max_tokens: 2048
+
+  - model_name: qwen-14b-local
+    litellm_params:
+      model: openai/qwen2.5-coder-14b-instruct
+      api_base: http://10.150.0.69:1234/v1
+      api_key: "lm-studio"
+      temperature: 0.2
+      max_tokens: 2048
+
+  - model_name: qwen-7b-local
+    litellm_params:
+      model: openai/qwen2.5.1-coder-7b-instruct
+      api_base: http://10.150.0.69:1234/v1
+      api_key: "lm-studio"
+      temperature: 0.2
+      max_tokens: 2048
+
+# ===== Configurações gerais =====
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+  database_url: os.environ/DATABASE_URL
+  store_model_in_db: true
+  store_prompts_in_spend_logs: true
+
+# ===== Configurações do LiteLLM =====
+litellm_settings:
+  drop_params: true
+  fallbacks:
+    - claude-opus: ["claude-sonnet", "gemini-3-1-pro"]
+    - claude-sonnet: ["gemini-3-1-pro", "qwen-14b-local"]
+    - gemini-3-1-pro: ["gemini-2-5-pro", "claude-sonnet"]
+
+# ===== Configurações de roteamento =====
+router_settings:
+  num_retries: 2
+  timeout: 600
+  routing_strategy: simple-shuffle
