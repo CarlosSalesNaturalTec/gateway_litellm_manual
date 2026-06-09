@@ -19,11 +19,13 @@ model_list:
     litellm_params:
       model: deepseek/deepseek-v4-pro
       api_key: os.environ/DEEPSEEK_API_KEY
+      additional_drop_params: ["response_format"]
 
   - model_name: deepseek-v4-flash
     litellm_params:
       model: deepseek/deepseek-v4-flash
       api_key: os.environ/DEEPSEEK_API_KEY
+      additional_drop_params: ["response_format"]
 
 # ===== Configurações gerais =====
 general_settings:

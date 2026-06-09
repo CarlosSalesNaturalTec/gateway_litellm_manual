@@ -42,13 +42,7 @@ services:
       - "4000:4000"
     volumes:
       - ./config.yaml:/app/config.yaml:ro
-      - /etc/ssl/certs/ca-certificates.crt:/etc/ssl/certs/ca-certificates.crt:ro
     environment:
-      # Certificates
-      SSL_CERT_FILE: /etc/ssl/certs/ca-certificates.crt
-      REQUESTS_CA_BUNDLE: /etc/ssl/certs/ca-certificates.crt
-      NODE_EXTRA_CA_CERTS: /etc/ssl/certs/ca-certificates.crt
-
       # API keys reais — lidas do .env
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
 
