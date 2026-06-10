@@ -20,12 +20,20 @@ model_list:
       model: deepseek/deepseek-v4-pro
       api_key: os.environ/DEEPSEEK_API_KEY
       additional_drop_params: ["response_format"]
+    model_info:
+      input_cost_per_token: 0.000000435    # $0.435/1M tokens (cache miss)
+      output_cost_per_token: 0.00000087    # $0.87/1M tokens
+      cache_read_input_token_cost: 0.000000003625  # $0.003625/1M (cache hit)
 
   - model_name: deepseek-v4-flash
     litellm_params:
       model: deepseek/deepseek-v4-flash
       api_key: os.environ/DEEPSEEK_API_KEY
       additional_drop_params: ["response_format"]
+    model_info:
+      input_cost_per_token: 0.00000014     # $0.14/1M tokens (cache miss)
+      output_cost_per_token: 0.00000028    # $0.28/1M tokens
+      cache_read_input_token_cost: 0.0000000028   # $0.0028/1M (cache hit)
 
 # ===== Configurações gerais =====
 general_settings:
